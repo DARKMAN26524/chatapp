@@ -146,6 +146,12 @@ app.post('/api/friends/request', async (req, res) => {
   receiver.friendRequests.push(req.user.id);
   await receiver.save();
 
+  // Notify receiver in realtime
+  const receiverSocketId = userSocketMap[receiverId];
+  if (receiverSocketId) {
+    io.to(receiverSocketId).emit('friendUpdate');
+  }
+
   res.json({ message: 'Friend request sent' });
 });
 
@@ -167,6 +173,13 @@ app.post('/api/friends/respond', async (req, res) => {
   }
 
   await me.save();
+
+  // Notify both users in realtime
+  const mySocketId = userSocketMap[req.user.id];
+  const requesterSocketId = userSocketMap[requesterId];
+  if (mySocketId) io.to(mySocketId).emit('friendUpdate');
+  if (requesterSocketId) io.to(requesterSocketId).emit('friendUpdate');
+
   res.json({ message: accept ? 'Friend added' : 'Request declined' });
 });
 
@@ -694,6 +707,12 @@ socket.on('sendMessage', async ({ receiverId, roomId, content = '', attachment, 
           .populate('replyTo')
           .populate('reactions.user', 'username');
         io.to(room).emit('receiveMessage', populatedMessage);
+
+        // Also send directly to receiver's socket in case they haven't joined the room yet
+        const receiverSocketId = userSocketMap[receiverId];
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit('receiveMessage', populatedMessage);
+        }
 
         // Send push notification to offline receiver
         if (!userSocketMap[receiverId]) {

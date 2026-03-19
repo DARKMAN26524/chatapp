@@ -781,6 +781,17 @@ export default function Chat({ token }) {
     }
   }, [selectedUser, selectedRoom, socket, users, friends, rooms, addToast, getEntityId])
 
+  // Realtime friend list updates (new request, accept, etc.)
+  useEffect(() => {
+    if (!socket) return
+    const onFriendUpdate = () => {
+      refreshFriends()
+      refreshRooms()
+    }
+    socket.on('friendUpdate', onFriendUpdate)
+    return () => socket.off('friendUpdate', onFriendUpdate)
+  }, [socket, refreshFriends, refreshRooms])
+
   useEffect(() => {
     if (!socket) return
 
