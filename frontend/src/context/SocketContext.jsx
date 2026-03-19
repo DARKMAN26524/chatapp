@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import io from 'socket.io-client'
 import { SocketContext } from './SocketContextValue'
 
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+
 export const SocketProvider = ({ children, token }) => {
   const [socket, setSocket] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])
@@ -16,7 +18,7 @@ export const SocketProvider = ({ children, token }) => {
       socketRef.current.disconnect()
     }
 
-    const newSocket = io('http://localhost:5000', {
+    const newSocket = io(API, {
       auth: { token }
     })
 
@@ -30,6 +32,13 @@ export const SocketProvider = ({ children, token }) => {
     })
     newSocket.on('userStopTyping', (data) => {
       setTypingUsers(prev => ({ ...prev, [data.senderId]: false }))
+    })
+
+    newSocket.on('roomTyping', (data) => {
+      setTypingUsers(prev => ({ ...prev, [`room:${data.roomId}`]: true }))
+    })
+    newSocket.on('roomStopTyping', (data) => {
+      setTypingUsers(prev => ({ ...prev, [`room:${data.roomId}`]: false }))
     })
 
     return () => {

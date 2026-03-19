@@ -8,7 +8,10 @@ const userSchema = new mongoose.Schema({
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+  friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  // Theme customization
+  theme: { type: String, default: 'dark' }, // 'light', 'dark', 'auto'
+  status: { type: String, default: 'online' } // 'online', 'away', 'busy', 'invisible'
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
