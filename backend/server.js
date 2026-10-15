@@ -557,6 +557,7 @@ mongoose.connect(process.env.MONGO_URI)
 
 // Socket.io logic (giữ nguyên như trước)
 const userSocketMap = {};
+const userSocketIds = {};
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
@@ -572,6 +573,8 @@ io.use((socket, next) => {
 
 io.on('connection', async (socket) => {
   const userId = socket.user.id;
+  const userSockets = userSocketIds[userId] || (userSocketIds[userId] = new Set());
+  userSockets.add(socket.id);
   userSocketMap[userId] = socket.id;
 
   await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: Date.now() });
@@ -756,8 +759,19 @@ socket.on('sendMessage', async ({ receiverId, roomId, content = '', attachment, 
   });
 
   socket.on('disconnect', async () => {
-    await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: Date.now() });
-    delete userSocketMap[userId];
+    const activeSockets = userSocketIds[userId];
+    activeSockets?.delete(socket.id);
+
+    if (activeSockets?.size) {
+      if (userSocketMap[userId] === socket.id) {
+        userSocketMap[userId] = activeSockets.values().next().value;
+      }
+    } else {
+      delete userSocketIds[userId];
+      delete userSocketMap[userId];
+      await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: Date.now() });
+    }
+
     io.emit('onlineUsers', Object.keys(userSocketMap));
   });
 });

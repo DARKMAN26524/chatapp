@@ -83,7 +83,7 @@ export default function Chat({ token }) {
     ? (typingUsers[`room:${selectedRoom._id}`] ? 'Typing...' : `${selectedRoom.members?.length || 0} member${(selectedRoom.members?.length || 0) === 1 ? '' : 's'}`)
     : selectedUser && (typingUsers[selectedUser._id]
       ? 'Typing...'
-      : onlineUsers.includes(selectedUser._id)
+      : onlineUsers.includes(String(selectedUser._id))
         ? 'Online'
         : selectedUser.lastSeen
           ? `Last seen ${new Date(selectedUser.lastSeen).toLocaleString()}`
@@ -1206,7 +1206,7 @@ export default function Chat({ token }) {
                   <div className="relative">
                     <img src={u.avatar} className="w-12 h-12 rounded-2xl object-cover" />
                     <span
-                      className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-950 ${onlineUsers.includes(u._id) ? 'bg-green-400' : 'bg-gray-600'}`}
+                      className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-950 ${onlineUsers.includes(String(u._id)) ? 'bg-green-400' : 'bg-gray-600'}`}
                     />
                   </div>
 
