@@ -2,7 +2,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const API = import.meta.env.VITE_API_URL || 'https://chatapp-dqda.onrender.com'
 
 export default function Login({ setToken }) {
   const [isLogin, setIsLogin] = useState(true)

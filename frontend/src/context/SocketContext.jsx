@@ -2,8 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import io from 'socket.io-client'
 import { SocketContext } from './SocketContextValue'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-
+const API = import.meta.env.VITE_API_URL || 'https://chatapp-dqda.onrender.com'
 export const SocketProvider = ({ children, token }) => {
   const [socket, setSocket] = useState(null)
   const [onlineUsers, setOnlineUsers] = useState([])

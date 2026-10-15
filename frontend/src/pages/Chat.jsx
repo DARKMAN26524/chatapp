@@ -5,7 +5,7 @@ import { Send, LogOut, Users, Phone, PhoneOff } from 'lucide-react';
 import EmojiPicker from '../components/EmojiPicker';
 import StickerPicker from '../components/StickerPicker';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = import.meta.env.VITE_API_URL || 'https://chatapp-dqda.onrender.com'
 
 export default function Chat({ token }) {
     // Emoji & sticker picker state (đã di chuyển lên đầu, nhưng hiện không dùng nên xóa)
