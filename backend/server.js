@@ -98,7 +98,7 @@ app.get('/api/rooms', async (req, res) => {
 });
 
 app.get('/api/rooms/:roomId/messages', async (req, res) => {
-  const messages = await Message.find({ room: req.params.roomId })
+  const messages = await Message.find({ room: req.params.roomId, isBot: { $ne: true } })
     .populate('replyTo')
     .populate('reactions.user', 'username')
     .sort({ createdAt: 1 });
@@ -185,6 +185,7 @@ app.post('/api/friends/respond', async (req, res) => {
 
 app.get('/api/messages/:receiverId', async (req, res) => {
   const messages = await Message.find({
+    isBot: { $ne: true },
     $or: [
       { sender: req.user.id, receiver: req.params.receiverId },
       { sender: req.params.receiverId, receiver: req.user.id }
@@ -462,90 +463,97 @@ app.post('/api/messages/reply/:messageId', async (req, res) => {
   res.json(populated);
 });
 
-// Bot message (AI response)
+app.get('/api/bot/messages', async (req, res) => {
+  const messages = await Message.find({
+    sender: req.user.id,
+    receiver: null,
+    room: null,
+    botType: 'ai'
+  }).sort({ createdAt: 1 });
+
+  res.json(messages);
+});
+
 app.post('/api/bot/message', async (req, res) => {
-  const { message, conversationId, type } = req.body;
+  const { message } = req.body;
 
   if (!message?.trim()) {
     return res.status(400).json({ message: 'message is required' });
   }
 
-  const cleanedMessage = message.trim();
-
-  let contextMessages = [];
-  try {
-    const query = type === 'room'
-      ? { room: conversationId }
-      : {
-          $or: [
-            { sender: req.user.id, receiver: conversationId },
-            { sender: conversationId, receiver: req.user.id }
-          ]
-        };
-
-    contextMessages = await Message.find(query)
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .lean();
-  } catch {
-    contextMessages = [];
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(503).json({ message: 'AI is not configured. Add GEMINI_API_KEY to the backend environment.' });
   }
 
-  const buildBotReply = (userText, context) => {
-    const text = userText.toLowerCase();
-    const recent = context
-      .filter(m => m.content)
-      .map(m => m.content.trim())
-      .filter(Boolean)
-      .slice(0, 3)
-      .reverse();
-
-    if (/^(hi|hello|hey|xin chao|chao)/.test(text)) {
-      return 'Xin chao, minh la tro ly AI trong chat. Ban can minh ho tro viec gi ngay bay gio?';
-    }
-
-    if (text.includes('help') || text.includes('ho tro')) {
-      return 'Minh co the giup tom tat tin nhan, goi y cau tra loi, va dua ra huong xu ly theo ngu canh doan chat hien tai.';
-    }
-
-    if (text.includes('tom tat') || text.includes('summary')) {
-      if (!recent.length) {
-        return 'Chua co du du lieu de tom tat. Ban hay nhan them vai tin trong cuoc tro chuyen.';
-      }
-      return `Tom tat nhanh: ${recent.join(' | ')}`;
-    }
-
-    if (text.endsWith('?')) {
-      return `Theo ngu canh hien tai, cau hoi cua ban la: "${userText}". Goi y: tach van de thanh 2-3 buoc nho, uu tien buoc co the kiem chung ngay.`;
-    }
-
-    if (recent.length) {
-      return `Minh da doc ngu canh gan day (${recent.length} tin). Goi y tiep theo: xac nhan muc tieu, thong nhat deadline, va chot nguoi phu trach.`;
-    }
-
-    return 'Minh da nhan duoc tin cua ban. Ban co the cho minh biet muc tieu cu the hon de minh ho tro chinh xac?';
-  };
-
-  const botReply = buildBotReply(cleanedMessage, contextMessages);
-
-  const botMessageData = {
-    sender: req.user.id, // treat bot messages as from the current user so they show in the current chat
+  const cleanedMessage = message.trim();
+  const botConversation = {
+    sender: req.user.id,
     receiver: null,
     room: null,
-    content: botReply,
-    isBot: true,
     botType: 'ai'
   };
+  const contextMessages = await Message.find(botConversation)
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .lean();
 
-  if (type === 'room') {
-    botMessageData.room = conversationId;
-  } else {
-    botMessageData.receiver = conversationId;
+  const contents = contextMessages
+    .filter(item => item.content?.trim())
+    .reverse()
+    .map(item => ({
+      role: item.isBot ? 'model' : 'user',
+      parts: [{ text: item.content.trim() }]
+    }));
+  contents.push({ role: 'user', parts: [{ text: cleanedMessage }] });
+
+  try {
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: 'You are a helpful AI assistant in a chat app. Reply naturally in the same language as the user. Keep answers clear and concise.' }]
+          },
+          contents,
+          generationConfig: { maxOutputTokens: 1024, temperature: 0.7 }
+        })
+      }
+    );
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('Gemini API returned an error:', response.status, data.error?.message || 'Unknown Gemini API error');
+      return res.status(502).json({ message: 'Gemini could not generate a response. Check the API key, model, and quota.' });
+    }
+
+    const botReply = data.candidates?.[0]?.content?.parts
+      ?.map(part => part.text || '')
+      .join('')
+      .trim();
+    if (!botReply) {
+      console.error('Gemini API returned no text:', data.promptFeedback || data.candidates?.[0]?.finishReason || 'No candidate text');
+      return res.status(502).json({ message: 'Gemini returned no text. Try rephrasing your message.' });
+    }
+
+    const userMessage = await new Message({
+      ...botConversation,
+      content: cleanedMessage,
+      isBot: false
+    }).save();
+    const botMessage = await new Message({
+      ...botConversation,
+      content: botReply,
+      isBot: true
+    }).save();
+
+    res.json({ userMessage, botMessage });
+  } catch (error) {
+    console.error('Gemini request failed:', error);
+    res.status(502).json({ message: 'Could not reach Gemini. Please try again later.' });
   }
-
-  const botMessage = await new Message(botMessageData).save();
-
-  res.json(botMessage);
 });
 
 // =================================
@@ -579,6 +587,10 @@ io.on('connection', async (socket) => {
 
   await User.findByIdAndUpdate(userId, { isOnline: true, lastSeen: Date.now() });
   io.emit('onlineUsers', Object.keys(userSocketMap));
+
+  socket.on('requestOnlineUsers', () => {
+    socket.emit('onlineUsers', Object.keys(userSocketMap));
+  });
 
   socket.on('joinChat', async ({ receiverId }) => {
     const room = [userId, receiverId].sort().join('_');

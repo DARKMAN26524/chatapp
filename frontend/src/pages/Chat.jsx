@@ -14,6 +14,8 @@ export default function Chat({ token }) {
   const [rooms, setRooms] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
   const [selectedRoom, setSelectedRoom] = useState(null)
+  const [selectedBot, setSelectedBot] = useState(false)
+  const [botLoading, setBotLoading] = useState(false)
   const [messages, setMessages] = useState([])
   const [unreadCounts, setUnreadCounts] = useState({})
   const [roomUnreadCounts, setRoomUnreadCounts] = useState({})
@@ -78,8 +80,10 @@ export default function Chat({ token }) {
 
   const isLoggedIn = Boolean(token && currentUserId)
 
-  const selectedChatTitle = selectedRoom ? selectedRoom.name : selectedUser?.username
-  const selectedChatSubtitle = selectedRoom
+  const selectedChatTitle = selectedBot ? 'AI Assistant' : selectedRoom ? selectedRoom.name : selectedUser?.username
+  const selectedChatSubtitle = selectedBot
+    ? 'Private conversation'
+    : selectedRoom
     ? (typingUsers[`room:${selectedRoom._id}`] ? 'Typing...' : `${selectedRoom.members?.length || 0} member${(selectedRoom.members?.length || 0) === 1 ? '' : 's'}`)
     : selectedUser && (typingUsers[selectedUser._id]
       ? 'Typing...'
@@ -179,6 +183,7 @@ export default function Chat({ token }) {
       setRooms(prev => [res.data, ...prev])
       setSelectedRoom(res.data)
       setSelectedUser(null)
+      setSelectedBot(false)
       setShowCreateRoom(false)
       setNewRoomName('')
       setNewRoomMembers([])
@@ -448,27 +453,23 @@ export default function Chat({ token }) {
   }
 
   const sendBotMessage = async () => {
-    if (!selectedUser && !selectedRoom) {
-      addToast('Select a chat before using AI')
-      return
-    }
+    const prompt = newMessage.trim()
+    if (!selectedBot || !prompt || botLoading) return
 
-    const prompt = newMessage.trim() || messages[messages.length - 1]?.content || 'Help me with this chat'
-
+    setBotLoading(true)
     try {
       const res = await axios.post(`${API}/api/bot/message`, {
-        message: prompt,
-        conversationId: selectedUser?._id || selectedRoom?._id,
-        type: selectedRoom ? 'room' : 'user'
+        message: prompt
       }, {
         headers: { Authorization: `Bearer ${token}` }
       })
 
-      // Show bot reply immediately
-      setMessages(prev => [...prev, res.data])
-      if (newMessage.trim()) setNewMessage('')
-    } catch {
-      addToast('Bot is unavailable')
+      setMessages(prev => [...prev, res.data.userMessage, res.data.botMessage])
+      setNewMessage('')
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Bot is unavailable')
+    } finally {
+      setBotLoading(false)
     }
   }
 
@@ -698,6 +699,23 @@ export default function Chat({ token }) {
       headers: { Authorization: `Bearer ${token}` }
     }).then(res => setMessages(res.data)).catch(() => {})
   }, [selectedRoom, token, socket])
+
+  useEffect(() => {
+    if (!selectedBot || !token) return
+
+    let active = true
+    axios.get(`${API}/api/bot/messages`, {
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(res => {
+      if (active) setMessages(res.data)
+    }).catch(() => {
+      if (active) addToast('Failed to load AI conversation')
+    })
+
+    return () => {
+      active = false
+    }
+  }, [selectedBot, token, addToast])
 
   // Nhận tin nhắn real-time
   useEffect(() => {
@@ -1153,6 +1171,23 @@ export default function Chat({ token }) {
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          <button
+            onClick={() => {
+              setSelectedBot(true)
+              setSelectedUser(null)
+              setSelectedRoom(null)
+              setMessages([])
+            }}
+            className={`w-full flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-800 text-left transition-all ${selectedBot ? 'bg-blue-900/50' : 'hover:bg-gray-200/50 dark:hover:bg-gray-900/50'}`}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-2xl">
+              🤖
+            </div>
+            <div>
+              <p className="font-semibold text-sm text-slate-900 dark:text-white">AI Assistant</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">Private conversation</p>
+            </div>
+          </button>
           {viewTab === 'rooms' ? (
             filteredRooms.map(room => {
               const unread = roomUnreadCounts[room._id] || 0
@@ -1162,6 +1197,8 @@ export default function Chat({ token }) {
                   onClick={() => {
                     setSelectedRoom(room)
                     setSelectedUser(null)
+                    setSelectedBot(false)
+                    setMessages([])
                   }}
                   className={`flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-800 cursor-pointer transition-all ${selectedRoom?._id === room._id ? 'bg-blue-900/50' : 'hover:bg-gray-200/50 dark:hover:bg-gray-900/50'}`}
                 >
@@ -1200,6 +1237,8 @@ export default function Chat({ token }) {
                   onClick={() => {
                     setSelectedUser(u)
                     setSelectedRoom(null)
+                    setSelectedBot(false)
+                    setMessages([])
                   }}
                   className={`flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-800 cursor-pointer transition-all ${selectedUser?._id === u._id ? 'bg-blue-900/50' : 'hover:bg-gray-200/50 dark:hover:bg-gray-900/50'}`}
                 >
@@ -1268,13 +1307,17 @@ export default function Chat({ token }) {
 
       {/* Chat Area */}
       <div className="flex-1 flex flex-col">
-        {(selectedUser || selectedRoom) ? (
+        {(selectedBot || selectedUser || selectedRoom) ? (
           <>
             <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {selectedRoom ? (
                   <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-indigo-500 to-sky-500 flex items-center justify-center">
                     <Users size={28} className="text-white" />
+                  </div>
+                ) : selectedBot ? (
+                  <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-2xl">
+                    🤖
                   </div>
                 ) : (
                   <img src={selectedUser?.avatar} className="w-12 h-12 rounded-2xl" />
@@ -1343,7 +1386,7 @@ export default function Chat({ token }) {
 
             <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-white">
               {messages.map((msg) => {
-                const isOwnMessage = getEntityId(msg.sender) === currentUserId
+                const isOwnMessage = !msg.isBot && getEntityId(msg.sender) === currentUserId
                 return (
                 <div key={msg._id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
                   <div className="group relative max-w-[70%]">
@@ -1504,7 +1547,7 @@ export default function Chat({ token }) {
 
             <div className="p-5 bg-white border-t border-gray-200">
               {/* Reply indicator */}
-              {replyingTo && (
+              {!selectedBot && replyingTo && (
                 <div className="mb-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
@@ -1524,26 +1567,18 @@ export default function Chat({ token }) {
               )}
 
               <div className="flex items-center gap-3">
-                <label className={`cursor-pointer p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                {!selectedBot && <label className={`cursor-pointer p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
                   <input type="file" className="hidden" onChange={handleFileChange} disabled={uploading} />
                   {uploading ? '⏳' : '📎'}
-                </label>
+                </label>}
 
-                <button
+                {!selectedBot && <button
                   onClick={() => setShowGifPicker(!showGifPicker)}
                   className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition"
                   title="GIF"
                 >
                   🎭
-                </button>
-
-                <button
-                  onClick={sendBotMessage}
-                  className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition"
-                  title="Chat with Bot"
-                >
-                  🤖
-                </button>
+                </button>}
 
                 <div className="flex-1">
                   {attachment && (
@@ -1554,7 +1589,7 @@ export default function Chat({ token }) {
                   )}
 
                   {/* GIF Picker */}
-                  {showGifPicker && (
+                  {!selectedBot && showGifPicker && (
                     <div className="mb-2 p-3 bg-gray-50 rounded-xl">
                       <div className="flex gap-2 mb-2">
                         <input
@@ -1592,7 +1627,7 @@ export default function Chat({ token }) {
                     value={newMessage}
                     onChange={e => {
                       setNewMessage(e.target.value)
-                      if (!socket) return
+                      if (!socket || selectedBot) return
                       if (selectedRoom) {
                         socket.emit('roomTyping', { roomId: selectedRoom._id })
                         setTimeout(() => socket.emit('roomStopTyping', { roomId: selectedRoom._id }), 800)
@@ -1601,14 +1636,14 @@ export default function Chat({ token }) {
                         setTimeout(() => socket.emit('stopTyping', { receiverId: selectedUser._id }), 800)
                       }
                     }}
-                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                    placeholder="Type a message..."
+                    onKeyDown={e => e.key === 'Enter' && (selectedBot ? sendBotMessage() : sendMessage())}
+                    placeholder={selectedBot ? 'Message AI Assistant...' : 'Type a message...'}
                     className="w-full bg-gray-200 text-sm p-4 rounded-full focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
-                <button onClick={sendMessage} className="bg-blue-600 hover:bg-blue-700 p-3 rounded-full transition">
-                  <Send size={20} />
+                <button onClick={selectedBot ? sendBotMessage : sendMessage} disabled={selectedBot && botLoading} className="bg-blue-600 hover:bg-blue-700 p-3 rounded-full transition disabled:opacity-50">
+                  {botLoading ? '…' : <Send size={20} />}
                 </button>
               </div>
             </div>

@@ -18,7 +18,8 @@ export const SocketProvider = ({ children, token }) => {
     }
 
     const newSocket = io(API, {
-      auth: { token }
+      auth: { token },
+      autoConnect: false
     })
 
     socketRef.current = newSocket
@@ -26,6 +27,10 @@ export const SocketProvider = ({ children, token }) => {
     setSocket(newSocket)
 
     newSocket.on('onlineUsers', setOnlineUsers)
+    newSocket.on('connect', () => newSocket.emit('requestOnlineUsers'))
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket connection failed:', error.message)
+    })
     newSocket.on('userTyping', (data) => {
       setTypingUsers(prev => ({ ...prev, [data.senderId]: true }))
     })
@@ -40,8 +45,12 @@ export const SocketProvider = ({ children, token }) => {
       setTypingUsers(prev => ({ ...prev, [`room:${data.roomId}`]: false }))
     })
 
+    newSocket.connect()
+
     return () => {
       newSocket.off('onlineUsers')
+      newSocket.off('connect')
+      newSocket.off('connect_error')
       newSocket.off('userTyping')
       newSocket.off('userStopTyping')
       newSocket.disconnect()
