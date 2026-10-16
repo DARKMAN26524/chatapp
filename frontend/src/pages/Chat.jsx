@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { useSocket } from '../hooks/useSocket';
-import { Send, LogOut, Users, Phone, PhoneOff } from 'lucide-react';
+import { Send, LogOut, Users, Phone, PhoneOff, MessageCircle, X } from 'lucide-react';
 import EmojiPicker from '../components/EmojiPicker';
 import StickerPicker from '../components/StickerPicker';
 
@@ -14,8 +14,11 @@ export default function Chat({ token }) {
   const [rooms, setRooms] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
   const [selectedRoom, setSelectedRoom] = useState(null)
-  const [selectedBot, setSelectedBot] = useState(false)
+  const [supportOpen, setSupportOpen] = useState(false)
   const [botLoading, setBotLoading] = useState(false)
+  const [supportHistoryLoading, setSupportHistoryLoading] = useState(false)
+  const [supportMessages, setSupportMessages] = useState([])
+  const [supportInput, setSupportInput] = useState('')
   const [messages, setMessages] = useState([])
   const [unreadCounts, setUnreadCounts] = useState({})
   const [roomUnreadCounts, setRoomUnreadCounts] = useState({})
@@ -33,6 +36,7 @@ export default function Chat({ token }) {
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
   const messagesEndRef = useRef(null)
+  const supportMessagesEndRef = useRef(null)
 
   // New states for advanced features
   const [userPreferences, setUserPreferences] = useState(() => ({ theme: localStorage.getItem('theme') || 'dark', status: 'online' }))
@@ -80,10 +84,8 @@ export default function Chat({ token }) {
 
   const isLoggedIn = Boolean(token && currentUserId)
 
-  const selectedChatTitle = selectedBot ? 'AI Assistant' : selectedRoom ? selectedRoom.name : selectedUser?.username
-  const selectedChatSubtitle = selectedBot
-    ? 'Private conversation'
-    : selectedRoom
+  const selectedChatTitle = selectedRoom ? selectedRoom.name : selectedUser?.username
+  const selectedChatSubtitle = selectedRoom
     ? (typingUsers[`room:${selectedRoom._id}`] ? 'Typing...' : `${selectedRoom.members?.length || 0} member${(selectedRoom.members?.length || 0) === 1 ? '' : 's'}`)
     : selectedUser && (typingUsers[selectedUser._id]
       ? 'Typing...'
@@ -183,7 +185,6 @@ export default function Chat({ token }) {
       setRooms(prev => [res.data, ...prev])
       setSelectedRoom(res.data)
       setSelectedUser(null)
-      setSelectedBot(false)
       setShowCreateRoom(false)
       setNewRoomName('')
       setNewRoomMembers([])
@@ -453,8 +454,8 @@ export default function Chat({ token }) {
   }
 
   const sendBotMessage = async () => {
-    const prompt = newMessage.trim()
-    if (!selectedBot || !prompt || botLoading) return
+    const prompt = supportInput.trim()
+    if (!prompt || botLoading || supportHistoryLoading) return
 
     setBotLoading(true)
     try {
@@ -464,8 +465,8 @@ export default function Chat({ token }) {
         headers: { Authorization: `Bearer ${token}` }
       })
 
-      setMessages(prev => [...prev, res.data.userMessage, res.data.botMessage])
-      setNewMessage('')
+      setSupportMessages(prev => [...prev, res.data.userMessage, res.data.botMessage])
+      setSupportInput('')
     } catch (err) {
       addToast(err.response?.data?.message || 'Bot is unavailable')
     } finally {
@@ -701,21 +702,29 @@ export default function Chat({ token }) {
   }, [selectedRoom, token, socket])
 
   useEffect(() => {
-    if (!selectedBot || !token) return
+    if (!supportOpen || !token) return
 
     let active = true
+    setSupportHistoryLoading(true)
     axios.get(`${API}/api/bot/messages`, {
       headers: { Authorization: `Bearer ${token}` }
     }).then(res => {
-      if (active) setMessages(res.data)
+      if (active) setSupportMessages(res.data)
     }).catch(() => {
       if (active) addToast('Failed to load AI conversation')
+    }).finally(() => {
+      if (active) setSupportHistoryLoading(false)
     })
 
     return () => {
       active = false
     }
-  }, [selectedBot, token, addToast])
+  }, [supportOpen, token, addToast])
+
+  useEffect(() => {
+    if (!supportOpen) return
+    supportMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [supportMessages, botLoading, supportOpen])
 
   // Nhận tin nhắn real-time
   useEffect(() => {
@@ -1171,23 +1180,6 @@ export default function Chat({ token }) {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <button
-            onClick={() => {
-              setSelectedBot(true)
-              setSelectedUser(null)
-              setSelectedRoom(null)
-              setMessages([])
-            }}
-            className={`w-full flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-800 text-left transition-all ${selectedBot ? 'bg-blue-900/50' : 'hover:bg-gray-200/50 dark:hover:bg-gray-900/50'}`}
-          >
-            <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-2xl">
-              🤖
-            </div>
-            <div>
-              <p className="font-semibold text-sm text-slate-900 dark:text-white">AI Assistant</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500">Private conversation</p>
-            </div>
-          </button>
           {viewTab === 'rooms' ? (
             filteredRooms.map(room => {
               const unread = roomUnreadCounts[room._id] || 0
@@ -1197,7 +1189,6 @@ export default function Chat({ token }) {
                   onClick={() => {
                     setSelectedRoom(room)
                     setSelectedUser(null)
-                    setSelectedBot(false)
                     setMessages([])
                   }}
                   className={`flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-800 cursor-pointer transition-all ${selectedRoom?._id === room._id ? 'bg-blue-900/50' : 'hover:bg-gray-200/50 dark:hover:bg-gray-900/50'}`}
@@ -1237,7 +1228,6 @@ export default function Chat({ token }) {
                   onClick={() => {
                     setSelectedUser(u)
                     setSelectedRoom(null)
-                    setSelectedBot(false)
                     setMessages([])
                   }}
                   className={`flex items-center gap-3 px-5 py-4 border-b border-gray-200 dark:border-gray-800 cursor-pointer transition-all ${selectedUser?._id === u._id ? 'bg-blue-900/50' : 'hover:bg-gray-200/50 dark:hover:bg-gray-900/50'}`}
@@ -1307,17 +1297,13 @@ export default function Chat({ token }) {
 
       {/* Chat Area */}
       <div className="flex-1 flex flex-col">
-        {(selectedBot || selectedUser || selectedRoom) ? (
+        {(selectedUser || selectedRoom) ? (
           <>
             <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {selectedRoom ? (
                   <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-indigo-500 to-sky-500 flex items-center justify-center">
                     <Users size={28} className="text-white" />
-                  </div>
-                ) : selectedBot ? (
-                  <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-violet-500 to-indigo-500 flex items-center justify-center text-2xl">
-                    🤖
                   </div>
                 ) : (
                   <img src={selectedUser?.avatar} className="w-12 h-12 rounded-2xl" />
@@ -1547,7 +1533,7 @@ export default function Chat({ token }) {
 
             <div className="p-5 bg-white border-t border-gray-200">
               {/* Reply indicator */}
-              {!selectedBot && replyingTo && (
+              {replyingTo && (
                 <div className="mb-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
@@ -1567,18 +1553,18 @@ export default function Chat({ token }) {
               )}
 
               <div className="flex items-center gap-3">
-                {!selectedBot && <label className={`cursor-pointer p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                <label className={`cursor-pointer p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
                   <input type="file" className="hidden" onChange={handleFileChange} disabled={uploading} />
                   {uploading ? '⏳' : '📎'}
-                </label>}
+                </label>
 
-                {!selectedBot && <button
+                <button
                   onClick={() => setShowGifPicker(!showGifPicker)}
                   className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 transition"
                   title="GIF"
                 >
                   🎭
-                </button>}
+                </button>
 
                 <div className="flex-1">
                   {attachment && (
@@ -1589,7 +1575,7 @@ export default function Chat({ token }) {
                   )}
 
                   {/* GIF Picker */}
-                  {!selectedBot && showGifPicker && (
+                  {showGifPicker && (
                     <div className="mb-2 p-3 bg-gray-50 rounded-xl">
                       <div className="flex gap-2 mb-2">
                         <input
@@ -1627,7 +1613,7 @@ export default function Chat({ token }) {
                     value={newMessage}
                     onChange={e => {
                       setNewMessage(e.target.value)
-                      if (!socket || selectedBot) return
+                      if (!socket) return
                       if (selectedRoom) {
                         socket.emit('roomTyping', { roomId: selectedRoom._id })
                         setTimeout(() => socket.emit('roomStopTyping', { roomId: selectedRoom._id }), 800)
@@ -1636,14 +1622,14 @@ export default function Chat({ token }) {
                         setTimeout(() => socket.emit('stopTyping', { receiverId: selectedUser._id }), 800)
                       }
                     }}
-                    onKeyDown={e => e.key === 'Enter' && (selectedBot ? sendBotMessage() : sendMessage())}
-                    placeholder={selectedBot ? 'Message AI Assistant...' : 'Type a message...'}
+                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    placeholder="Type a message..."
                     className="w-full bg-gray-200 text-sm p-4 rounded-full focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
-                <button onClick={selectedBot ? sendBotMessage : sendMessage} disabled={selectedBot && botLoading} className="bg-blue-600 hover:bg-blue-700 p-3 rounded-full transition disabled:opacity-50">
-                  {botLoading ? '…' : <Send size={20} />}
+                <button onClick={sendMessage} className="bg-blue-600 hover:bg-blue-700 p-3 rounded-full transition disabled:opacity-50">
+                  <Send size={20} />
                 </button>
               </div>
             </div>
@@ -1683,6 +1669,93 @@ export default function Chat({ token }) {
 
       <audio ref={localAudioRef} autoPlay muted className="hidden" />
       <audio ref={remoteAudioRef} autoPlay className="hidden" />
+
+      {supportOpen ? (
+        <section className="fixed bottom-4 right-4 z-40 flex h-[min(560px,calc(100dvh-2rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+          <header className="flex items-center justify-between bg-blue-600 px-4 py-3 text-white">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl">🤖</div>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-white">Trợ lý hỗ trợ</p>
+                <p className="text-xs text-blue-100">Hỗ trợ tự động</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSupportOpen(false)}
+              aria-label="Đóng cửa sổ hỗ trợ"
+              className="rounded-full p-2 transition hover:bg-white/15"
+            >
+              <X size={18} />
+            </button>
+          </header>
+
+          <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4 dark:bg-gray-950" role="log" aria-live="polite">
+            {!supportMessages.length && !supportHistoryLoading && (
+              <div className="rounded-2xl rounded-tl-sm bg-white p-3 text-left text-sm text-gray-700 shadow-sm dark:bg-gray-800 dark:text-gray-200">
+                Xin chào! Bạn cần mình hỗ trợ vấn đề gì?
+              </div>
+            )}
+            {supportHistoryLoading && !supportMessages.length && (
+              <p className="text-center text-xs text-gray-400">Đang tải cuộc trò chuyện...</p>
+            )}
+            {supportMessages.map(message => {
+              const isOwnMessage = !message.isBot
+              return (
+                <div key={message._id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-left text-sm shadow-sm ${isOwnMessage ? 'rounded-br-sm bg-blue-600 text-white' : 'rounded-tl-sm bg-white text-gray-800 dark:bg-gray-800 dark:text-gray-100'}`}>
+                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    {message.createdAt && (
+                      <time className={`mt-1 block text-[10px] ${isOwnMessage ? 'text-blue-100' : 'text-gray-400'}`}>
+                        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </time>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            {botLoading && (
+              <p className="text-left text-xs text-gray-400">Trợ lý đang soạn phản hồi...</p>
+            )}
+            <div ref={supportMessagesEndRef} />
+          </div>
+
+          <form
+            className="flex items-center gap-2 border-t border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900"
+            onSubmit={event => {
+              event.preventDefault()
+              sendBotMessage()
+            }}
+          >
+            <input
+              value={supportInput}
+              onChange={event => setSupportInput(event.target.value)}
+              placeholder="Nhập nội dung cần hỗ trợ..."
+              aria-label="Tin nhắn hỗ trợ"
+              disabled={supportHistoryLoading}
+              className="min-w-0 flex-1 rounded-full bg-gray-100 px-4 py-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 disabled:opacity-60 dark:bg-gray-800 dark:text-white"
+            />
+            <button
+              type="submit"
+              disabled={!supportInput.trim() || botLoading || supportHistoryLoading}
+              aria-label="Gửi tin nhắn hỗ trợ"
+              className="rounded-full bg-blue-600 p-3 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Send size={18} />
+            </button>
+          </form>
+        </section>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSupportOpen(true)}
+          aria-label="Mở cửa sổ hỗ trợ"
+          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 font-medium text-white shadow-xl transition hover:bg-blue-700 hover:shadow-2xl"
+        >
+          <MessageCircle size={20} />
+          <span>Hỗ trợ</span>
+        </button>
+      )}
 
       {showCreateRoom && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
